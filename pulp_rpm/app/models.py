@@ -116,7 +116,7 @@ class Package(Content):
     release = models.TextField()
     arch = models.TextField()
 
-    pkgId = models.TextField(unique=True)  # formerly "checksum" in Pulp 2
+    pkgId = models.TextField()  # formerly "checksum" in Pulp 2
     checksum_type = models.TextField(choices=CHECKSUM_CHOICES)
 
     # Optional metadata
