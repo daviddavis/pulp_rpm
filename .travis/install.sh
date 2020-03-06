@@ -115,3 +115,10 @@ show_logs_and_return_non_zero() {
     return "${rc}"
 }
 .travis/pulp-operator-check-and-wait.sh || show_logs_and_return_non_zero
+
+echo "FINSHING INSTALL!"
+API_NODE=$( echo "$pods" | awk -F '[ :/]+' '/pulp-api/{print $8}')
+API_PORT=$( echo "$services" | awk -F '[ :/]+' '/pulp-api/{print $6}')
+URL=http://$API_NODE:$API_PORT/pulp/api/v3/status/
+http --timeout 5 --check-status --pretty format --print hb $URL
+echo "DONE!"
