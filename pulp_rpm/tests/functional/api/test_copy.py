@@ -15,7 +15,6 @@ from pulp_smash.pulp3.utils import (
 )
 
 from pulp_rpm.tests.functional.constants import (
-    KICKSTART_CONTENT_PATH,
     PULP_TYPE_PACKAGE,
     PULP_TYPE_PACKAGE_CATEGORY,
     PULP_TYPE_PACKAGE_GROUP,
@@ -208,7 +207,7 @@ class BasicCopyTestCase(BaseCopy):
         )
         latest_href = source_repo["latest_version_href"]
 
-        content = self.client.get(f"{KICKSTART_CONTENT_PATH}?repository_version={latest_href}")
+        content = self.client.get(f"{RPM_KICKSTART_FIXTURE_URL}?repository_version={latest_href}")
         content_to_copy = [content["results"][0]["pulp_href"]]
 
         config = [{
@@ -221,7 +220,7 @@ class BasicCopyTestCase(BaseCopy):
 
         dest_repo = self.client.get(dest_repo['pulp_href'])
         latest_href = dest_repo["latest_version_href"]
-        dc = self.client.get(f"{KICKSTART_CONTENT_PATH}?repository_version={latest_href}")
+        dc = self.client.get(f"{RPM_KICKSTART_FIXTURE_URL}?repository_version={latest_href}")
         dest_content = [c["pulp_href"] for c in dc["results"]]
 
         self.assertEqual(content_to_copy, dest_content)
