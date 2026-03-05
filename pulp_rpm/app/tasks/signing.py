@@ -1,7 +1,8 @@
-import asyncio
+import concurrent.futures
 import logging
 import re
 import subprocess
+from functools import partial
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -68,7 +69,9 @@ def _verify_package_fingerprint(package_file, signing_fingerprint):
     return False
 
 
-def _create_signed_artifact(signed_package_path, result):
+def _sign_file(package_file, signing_service, signing_fingerprint):
+    result = signing_service.sign(package_file.name, pubkey_fingerprint=signing_fingerprint)
+    signed_package_path = Path(result["rpm_package"])
     if not signed_package_path.exists():
         raise Exception(f"Signing script did not create the signed package: {result}")
     artifact = Artifact.init_and_validate(str(signed_package_path))
@@ -76,12 +79,6 @@ def _create_signed_artifact(signed_package_path, result):
     resource = CreatedResource(content_object=artifact)
     resource.save()
     return artifact
-
-
-async def _sign_file(package_file, signing_service, signing_fingerprint):
-    result = await signing_service.asign(package_file.name, pubkey_fingerprint=signing_fingerprint)
-    signed_package_path = Path(result["rpm_package"])
-    return await asyncio.to_thread(_create_signed_artifact, signed_package_path, result)
 
 
 def _sign_package(package, signing_service, signing_fingerprint):
@@ -115,7 +112,7 @@ def _sign_package(package, signing_service, signing_fingerprint):
 
         # create a new signed version of the package
         log.info(f"Signing package {package.filename}.")
-        artifact = asyncio.run(_sign_file(final_package, signing_service, signing_fingerprint))
+        artifact = _sign_file(final_package, signing_service, signing_fingerprint)
         signed_package = package
         signed_package.pk = None
         signed_package.pulp_id = None
@@ -161,9 +158,7 @@ def sign_and_create(
             uploaded_package = Upload.objects.get(pk=temporary_file_pk)
             _save_upload(uploaded_package, final_package)
 
-        artifact = asyncio.run(
-            _sign_file(final_package, package_signing_service, signing_fingerprint)
-        )
+        artifact = _sign_file(final_package, package_signing_service, signing_fingerprint)
     uploaded_package.delete()
 
     # Create Package content
@@ -186,26 +181,21 @@ def signed_add_and_remove(
     if repo.package_signing_service:
         packages = list(Package.objects.filter(pk__in=add_content_units).all())
 
-        async def _sign_packages():
-            semaphore = asyncio.Semaphore(settings.MAX_PACKAGE_SIGNING_WORKERS)
+        sign = partial(
+            _sign_package,
+            signing_service=repo.package_signing_service,
+            signing_fingerprint=repo.package_signing_fingerprint,
+        )
 
-            async def _bounded_sign(pkg):
-                async with semaphore:
-                    return await asyncio.to_thread(
-                        _sign_package,
-                        pkg,
-                        repo.package_signing_service,
-                        repo.package_signing_fingerprint,
-                    )
-
-            return await asyncio.gather(*(_bounded_sign(pkg) for pkg in packages))
-
-        for result in asyncio.run(_sign_packages()):
-            if not result:
-                continue
-            old_id, new_id = result
-            while old_id in add_content_units:
-                add_content_units.remove(old_id)
-            add_content_units.append(new_id)
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=settings.MAX_PACKAGE_SIGNING_WORKERS
+        ) as executor:
+            for result in executor.map(sign, packages):
+                if not result:
+                    continue
+                old_id, new_id = result
+                while old_id in add_content_units:
+                    add_content_units.remove(old_id)
+                add_content_units.append(new_id)
 
     return add_and_remove(repository_pk, add_content_units, remove_content_units, base_version_pk)
