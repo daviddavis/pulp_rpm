@@ -1,5 +1,6 @@
 from gettext import gettext as _
 
+from django.http import HttpResponse
 from drf_spectacular.utils import extend_schema
 from rest_framework import viewsets
 from rest_framework.decorators import action
@@ -25,6 +26,7 @@ from pulpcore.plugin.viewsets import (
 )
 
 from pulp_rpm.app import tasks
+from pulp_rpm.app.comps import repo_version_to_comps_xml_str
 from pulp_rpm.app.constants import SYNC_POLICIES
 from pulp_rpm.app.models import (
     RpmDistribution,
@@ -140,6 +142,12 @@ class RpmRepositoryViewSet(RepositoryViewSet, RpmModifyRepositoryActionMixin, Ro
                     "has_model_or_domain_or_obj_perms:rpm.view_rpmrepository",
                     "has_remote_param_model_or_domain_or_obj_perms:rpm.view_rpmremote",
                 ],
+            },
+            {
+                "action": ["comps_xml"],
+                "principal": "authenticated",
+                "effect": "allow",
+                "condition": "has_model_or_domain_or_obj_perms:rpm.view_rpmrepository",
             },
             {
                 "action": ["list_roles", "add_role", "remove_role"],
@@ -274,6 +282,22 @@ class RpmRepositoryViewSet(RepositoryViewSet, RpmModifyRepositoryActionMixin, Ro
             },
         )
         return OperationPostponedResponse(result, request)
+
+    @extend_schema(
+        description="Generate and download the comps.xml document for the repository's "
+        "latest version.",
+        summary="Download comps.xml",
+        responses={200: {"type": "string", "format": "binary"}},
+    )
+    @action(detail=True, methods=["get"])
+    def comps_xml(self, request, pk):
+        """Generate the comps.xml document for the repository's latest version."""
+        repository = self.get_object()
+        repo_version = repository.latest_version()
+        comps_xml = repo_version_to_comps_xml_str(repo_version)
+        response = HttpResponse(comps_xml, content_type="application/xml")
+        response["Content-Disposition"] = 'attachment; filename="comps.xml"'
+        return response
 
 
 class RpmRepositoryVersionViewSet(RepositoryVersionViewSet):
